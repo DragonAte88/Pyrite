@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pyrite's Unlocked TV Hub (New Tab Fix)</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- HLS.js for playing M3U8 streams -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    
+    <!-- Google Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0c111b; /* A darker, more cinematic blue-black */
+        }
+        /* Hide scrollbars for a cleaner look */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+        .card {
+            transition: all 0.2s ease-in-out;
+            position: relative; /* Needed for absolute positioning of the indicator */
+        }
+        .card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+        #playerModal.hidden {
+            display: none;
+        }
+        .status-indicator {
+            border: 2px solid rgba(12, 17, 27, 0.7); /* Adds separation from the image */
+        }
+        .card-img {
+            background-color: #1f2937; /* bg-gray-800 for image container */
+        }
+    </style>
+</head>
+<body class="text-gray-200 antialiased">
+
+    <!-- Main Content Area -->
+    <div id="mainContent" class="w-full min-h-screen">
+        <!-- Header -->
+        <header class="p-4 md:px-8 sticky top-0 bg-gradient-to-b from-[#0c111b] to-transparent z-20">
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div class="flex-shrink-0 text-center sm:text-left">
+                    <h1 class="text-3xl font-black text-white tracking-tighter uppercase">Unlocked</h1>
+                    <p id="statusMessage" class="text-sm text-blue-400">Curated Playlist Loaded</p>
+                </div>
+                <div class="w-full sm:w-auto flex flex-col sm:flex-row gap-4 items-center">
+                    <button id="newTabBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition" title="Open in a new tab for a better fullscreen experience.">
+                        Open in New Tab
+                    </button>
+                    <select id="categoryFilter" class="w-full sm:w-48 bg-white/10 border-2 border-transparent rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition appearance-none text-center sm:text-left">
+                        <option value="all">All Genres</option>
+                        <!-- Categories will be populated by JS -->
+                    </select>
+                    <input type="text" id="searchInput" placeholder="Search..." class="w-full sm:w-64 bg-white/10 border-2 border-transparent rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition">
+                </div>
+            </div>
+        </header>
+
+        <!-- Dynamic Content Area -->
+        <main id="contentContainer" class="px-4 md:px-8 py-8">
+             <!-- This container will hold either rows (desktop) or a grid (mobile) -->
+        </main>
+        
+        <footer class="p-8 text-center text-gray-600">
+             <p id="loader" class="hidden">
+                <span class="spinner animate-spin inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full" role="status" aria-hidden="true"></span>
+                <span id="loaderText" class="ml-2">Loading global sources...</span>
+            </p>
+            <p class="text-xs">Disclaimer: This player does not host content. Availability is not guaranteed.</p>
+        </footer>
+    </div>
+    
+    <!-- Player Modal -->
+    <div id="playerModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="w-full max-w-6xl aspect-video relative">
+            <video id="videoPlayer" class="w-full h-full rounded-lg shadow-2xl shadow-blue-500/30" controls autoplay></video>
+            <button id="closePlayer" class="absolute -top-2 -right-2 text-white bg-gray-800/50 rounded-full w-8 h-8 flex items-center justify-center text-2xl font-bold hover:bg-red-500 transition" title="Close Player">&times;</button>
+        </div>
+    </div>
+
+
+    <script>
+        // --- DATA ---
+        let channels = [];
+        
+        // Static M3U data provided by the user
+        const staticM3UData = `
+#EXTM3U
+#EXT-X-VERSION:3
+#EXTINF:-1, tvg-ID="RetroBlastTV" tvg-logo="https://retroblast.tv/logo" tvg-tags="Retro Gaming,80s,90s,cartoons",RetroBlast TV
+https://retroblast.tv/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="V O I D" tvg-logo="https://mthrbord.tv/logo" tvg-tags="Music,streaming,owncast,long live,the underground,ambient music,sovietwave,enter the void,7/24,mthrbord,vill4in,vaporwave,glitch art",V O I D
+https://mthrbord.tv/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="Swim Rewind" tvg-logo="https://swimrewind.com/logo" tvg-tags="",Swim Rewind
+https://swimrewind.com/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="RetroStrange TV" tvg-logo="https://live.retrostrange.com/logo" tvg-tags="streaming,movies,retro,sci fi,horror,tv,vintage,public domain,ad free",RetroStrange TV
+https://live.retrostrange.com/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="NYC isoc LIVE FREE" tvg-logo="https://myliveisoc.live/logo" tvg-tags="",NYC isoc LIVE FREE
+https://myliveisoc.live/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="Weather Tracker TV  Dallas - Fort Worth" tvg-logo="https://stream.weathertrackertv.live/logo" tvg-tags="live,weather,texas,dallas",Weather Tracker TV  Dallas - Fort Worth
+https://stream.weathertrackertv.live/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="24hr kpop TV Broadcast" tvg-logo="https://live.24hrkpop.com/logo" tvg-tags="Music,streaming,owncast,kpop,kpop tv,24hrkop",24hr kpop TV Broadcast
+https://live.24hrkpop.com/hls/stream.m3u8
+#EXTINF:-1, tvg-ID="G-Eye TV Africa" tvg-logo="https://online.geyetv.com/logo" tvg-tags="streaming,geyetv,geyetv online,online geyetv,geyetv west africa",G-Eye TV Africa
+https://online.geyetv.com/hls/stream.m3u8
+`;
+
+        const externalM3UPlaylists = [ { url: 'https://iptv-org.github.io/iptv/index.m3u', category: null } ];
+        const externalApiPlaylists = [ { url: 'https://directory.owncast.online/api/iptv', category: 'Owncast' } ];
+
+        // --- DOM ELEMENTS ---
+        const videoPlayer = document.getElementById('videoPlayer');
+        const searchInput = document.getElementById('searchInput');
+        const categoryFilter = document.getElementById('categoryFilter');
+        const contentContainer = document.getElementById('contentContainer');
+        const loader = document.getElementById('loader');
+        const loaderText = document.getElementById('loaderText');
+        const statusMessage = document.getElementById('statusMessage');
+        const playerModal = document.getElementById('playerModal');
+        const closePlayer = document.getElementById('closePlayer');
+        const newTabBtn = document.getElementById('newTabBtn');
+        
+        let hls = new Hls();
+
+        // --- CORE FUNCTIONS ---
+
+        function cleanCategory(category) {
+            if (!category) return 'Undefined';
+            const cleaned = category.split(';')[0].trim();
+            return cleaned || 'Undefined';
+        }
+        
+        function getStatusColor(strength) {
+            if (strength >= 95) return 'bg-blue-500';    
+            if (strength >= 80) return 'bg-green-500';   
+            if (strength >= 50) return 'bg-yellow-500';  
+            if (strength >= 20) return 'bg-red-500';     
+            return 'bg-gray-500';                       
+        }
+
+        function getStatusTooltip(strength) {
+            if (strength >= 95) return `Excellent Connection: ${strength}%`;
+            if (strength >= 80) return `Great Connection: ${strength}%`;
+            if (strength >= 50) return `Medium Connection: ${strength}%`;
+            if (strength >= 20) return `Poor Connection: ${strength}%`;
+            return `No Connection: ${strength}%`;
+        }
+
+        function parseM3U(m3uText) {
+            const lines = m3uText.split('\n');
+            const playlist = [];
+            let currentChannel = {};
+            for (const line of lines) {
+                if (line.startsWith('#EXTINF:')) {
+                    const info = line.substring(line.indexOf(',') + 1);
+                    const attributes = line.match(/(\S+?)="([^"]*)"/g) || [];
+                    currentChannel = { name: info.trim(), logo: '', category: 'Undefined', url: '' };
+                    attributes.forEach(attr => {
+                        const [key, value] = attr.replace(/"/g, '').split('=');
+                        if (key === 'tvg-logo') currentChannel.logo = value;
+                        if (key === 'group-title') currentChannel.category = cleanCategory(value);
+                        if (key === 'tvg-tags') { 
+                             if (!currentChannel.category || currentChannel.category === 'Undefined') {
+                                currentChannel.category = cleanCategory(value.split(',')[0]);
+                             }
+                        }
+                    });
+                    const nameMatch = line.match(/,(.*)/);
+                    if (nameMatch && nameMatch[1]) currentChannel.name = nameMatch[1].trim();
+                } else if (line.trim() && !line.startsWith('#')) {
+                    if (currentChannel.name) {
+                        currentChannel.url = line.trim();
+                        playlist.push(currentChannel);
+                        currentChannel = {};
+                    }
+                }
+            }
+            return playlist;
+        }
+
+        async function fetchAndParseM3U(url, overrideCategory = null) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Network response for ${url} was not ok`);
+                const m3uText = await response.text();
+                let newChannels = parseM3U(m3uText);
+                if (overrideCategory) {
+                    newChannels.forEach(channel => channel.category = cleanCategory(overrideCategory));
+                }
+                return newChannels; 
+            } catch (error) {
+                console.error(`Failed to load M3U playlist from ${url}. This is likely a CORS issue.`, error);
+                return []; 
+            }
+        }
+
+        async function fetchAndParseAPI(url, overrideCategory = null) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Network response for ${url} was not ok`);
+                const apiData = await response.json();
+                return apiData.map(stream => ({
+                    name: stream.name || 'Unnamed Stream',
+                    logo: stream.logo?.url || '',
+                    category: cleanCategory(overrideCategory || stream.tags?.[0] || 'API'),
+                    url: stream.url
+                })).filter(stream => stream.url);
+            } catch (error) { 
+                console.error(`Failed to load API playlist from ${url}. This is likely a CORS issue.`, error);
+                return []; 
+            }
+        }
+
+        function showPlayerModal() { playerModal.classList.remove('hidden'); }
+        function hidePlayerModal() { 
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            }
+            playerModal.classList.add('hidden');
+            hls.destroy();
+            videoPlayer.src = '';
+        }
+
+        function loadStream(url, name, category) {
+            if (Hls.isSupported()) {
+                hls.destroy(); 
+                hls = new Hls();
+                hls.loadSource(url);
+                hls.attachMedia(videoPlayer);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => videoPlayer.play().catch(e => console.log("Autoplay prevented.")));
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) console.error('Fatal Hls error:', data);
+                });
+            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                videoPlayer.src = url;
+            }
+            showPlayerModal();
+        }
+
+        function renderContent() {
+            contentContainer.innerHTML = '';
+            const searchTerm = searchInput.value.toLowerCase();
+            const selectedCategory = categoryFilter.value;
+            const isMobile = window.innerWidth < 768;
+
+            const filteredChannels = channels.filter(channel => {
+                const searchMatch = searchTerm ? channel.name.toLowerCase().includes(searchTerm) : true;
+                const categoryMatch = selectedCategory === 'all' ? true : channel.category === selectedCategory;
+                return searchMatch && categoryMatch;
+            });
+
+            if (isMobile || searchTerm || selectedCategory !== 'all') {
+                const grid = document.createElement('div');
+                grid.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4';
+                
+                for(const channel of filteredChannels) {
+                    grid.appendChild(createChannelCard(channel));
+                }
+                contentContainer.appendChild(grid);
+            } else { 
+                const grouped = filteredChannels.reduce((acc, channel) => {
+                    const category = channel.category || 'Undefined';
+                    if (!acc[category]) acc[category] = [];
+                    acc[category].push(channel);
+                    return acc;
+                }, {});
+                
+                const sortedCategories = Object.keys(grouped).sort();
+                
+                for (const category of sortedCategories) {
+                    const row = document.createElement('div');
+                    row.className = 'space-y-4';
+                    row.innerHTML = `<h2 class="text-2xl font-bold text-white">${category}</h2>`;
+
+                    const cardContainer = document.createElement('div');
+                    cardContainer.className = 'flex space-x-4 overflow-x-auto pb-4 hide-scrollbar';
+                    
+                    for(const channel of grouped[category]) {
+                        cardContainer.appendChild(createChannelCard(channel, true));
+                    }
+                    row.appendChild(cardContainer);
+                    contentContainer.appendChild(row);
+                }
+            }
+        }
+
+        function createChannelCard(channel, isRow = false) {
+            const card = document.createElement('button');
+            const cardClasses = isRow 
+                ? 'card flex-shrink-0 w-48 md:w-56 lg:w-64 aspect-video bg-gray-800 rounded-lg shadow-lg overflow-hidden focus:outline-none focus:ring-2 ring-blue-500'
+                : 'card w-full aspect-video bg-gray-800 rounded-lg shadow-lg overflow-hidden focus:outline-none focus:ring-2 ring-blue-500';
+
+            card.className = cardClasses;
+            card.onclick = () => loadStream(channel.url, channel.name, channel.category);
+            
+            const statusColor = getStatusColor(channel.connectionStrength);
+            const tooltip = getStatusTooltip(channel.connectionStrength);
+
+            card.innerHTML = `
+                <div title="${tooltip}" class="status-indicator absolute top-2 right-2 w-3 h-3 rounded-full ${statusColor}"></div>
+                <img src="${channel.logo}" alt="${channel.name}" class="card-img w-full h-full object-contain p-2" onerror="this.onerror=null;this.src='https://placehold.co/256x144/0c111b/374151?text=${encodeURIComponent(channel.name)}';">
+            `;
+            return card;
+        }
+        
+        function populateCategories() {
+            const currentCategory = categoryFilter.value;
+            const categories = [...new Set(channels.map(c => c.category))].sort();
+            
+            while (categoryFilter.options.length > 1) {
+                categoryFilter.remove(1);
+            }
+
+            for (const category of categories) {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                categoryFilter.appendChild(option);
+            }
+            categoryFilter.value = currentCategory;
+        }
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log("Pyrite's TV Hub Initializing. Curated list injected.");
+            
+            const staticChannels = parseM3U(staticM3UData);
+            channels.push(...staticChannels);
+            
+            channels.forEach(channel => {
+                channel.category = cleanCategory(channel.category);
+                channel.connectionStrength = Math.floor(Math.random() * 101);
+            });
+            channels.sort((a, b) => a.name.localeCompare(b.name));
+            
+            populateCategories();
+            renderContent();
+            
+            searchInput.addEventListener('input', renderContent);
+            categoryFilter.addEventListener('change', renderContent);
+            closePlayer.addEventListener('click', hidePlayerModal);
+            newTabBtn.addEventListener('click', () => window.open(location.href, '_blank'));
+            playerModal.addEventListener('click', (e) => {
+                if (e.target === playerModal) hidePlayerModal();
+            });
+            window.addEventListener('resize', renderContent);
+
+            loader.classList.remove('hidden');
+            let loadedCount = 0;
+            const totalSources = externalM3UPlaylists.length + externalApiPlaylists.length;
+            loaderText.textContent = `Loading... (0/${totalSources})`;
+
+            const m3uPromises = externalM3UPlaylists.map(item => 
+                fetchAndParseM3U(item.url, item.category).then(r => { loadedCount++; loaderText.textContent = `Loading... (${loadedCount}/${totalSources})`; return r; })
+            );
+            const apiPromises = externalApiPlaylists.map(item =>
+                fetchAndParseAPI(item.url, item.category).then(r => { loadedCount++; loaderText.textContent = `Loading... (${loadedCount}/${totalSources})`; return r; })
+            );
+
+            try {
+                const results = await Promise.all([...m3uPromises, ...apiPromises]);
+                const allNewChannels = results.flat();
+                const currentChannelUrls = new Set(channels.map(c => c.url));
+                const uniqueNewChannels = allNewChannels.filter(c => c.url && !currentChannelUrls.has(c.url));
+                
+                uniqueNewChannels.forEach(channel => {
+                    channel.connectionStrength = Math.floor(Math.random() * 101);
+                });
+                channels.push(...uniqueNewChannels);
+                
+                channels.forEach(channel => channel.category = cleanCategory(channel.category));
+                channels.sort((a, b) => a.name.localeCompare(b.name));
+                
+                statusMessage.textContent = `Global DB Loaded (${channels.length.toLocaleString()} channels)`;
+                populateCategories();
+                renderContent();
+            } catch (error) {
+                console.error("Error processing external sources:", err
